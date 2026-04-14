@@ -1,7 +1,7 @@
 {
   "id": "hermes-obsidian-mvp",
   "name": "Hermes Obsidian MVP",
-  "version": "0.0.2",
+  "version": "0.0.1",
   "minAppVersion": "1.5.0",
   "description": "Minimal Obsidian sidebar chat plugin that talks to Hermes via ACP.",
   "author": "George",

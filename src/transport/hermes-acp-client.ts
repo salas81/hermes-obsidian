@@ -1,8 +1,14 @@
-import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
+import { ChildProcessWithoutNullStreams, spawn } from 'child_process';
 
 type PendingRequest = {
   resolve: (value: any) => void;
   reject: (reason?: unknown) => void;
+};
+
+type SessionUpdateParams = {
+  sessionId?: string;
+  session_id?: string;
+  update?: Record<string, any>;
 };
 
 export class HermesACPClient {
@@ -13,6 +19,8 @@ export class HermesACPClient {
   private initialized = false;
   private sessionId: string | null = null;
   onAssistantText?: (text: string) => void;
+  onStatus?: (text: string) => void;
+  onError?: (text: string) => void;
 
   constructor(private hermesCommand: string) {}
 
@@ -30,14 +38,22 @@ export class HermesACPClient {
     });
 
     this.proc.stderr.on('data', chunk => {
-      console.log('[Hermes ACP stderr]', chunk.toString('utf8'));
+      const text = chunk.toString('utf8').trim();
+      if (text && this.onStatus) this.onStatus(text);
+    });
+
+    this.proc.on('error', error => {
+      this.onError?.(`Failed to start Hermes ACP: ${String(error)}`);
     });
 
     this.proc.on('exit', code => {
-      console.log('[Hermes ACP exited]', code);
+      const error = `Hermes ACP exited${code !== null ? ` with code ${code}` : ''}`;
+      for (const pending of this.pending.values()) pending.reject(new Error(error));
+      this.pending.clear();
       this.proc = null;
       this.initialized = false;
       this.sessionId = null;
+      this.onStatus?.(error);
     });
   }
 
@@ -52,7 +68,7 @@ export class HermesACPClient {
         const msg = JSON.parse(line);
         this.handleMessage(msg);
       } catch (error) {
-        console.warn('Failed to parse ACP output line', error, line);
+        this.onError?.(`Failed to parse ACP output: ${String(error)}`);
       }
     }
   }
@@ -67,18 +83,60 @@ export class HermesACPClient {
     }
 
     if (msg.method === 'session/update') {
-      const serialized = JSON.stringify(msg.params ?? {});
-      const match = serialized.match(/"text"\s*:\s*"([^"]*)"/g);
-      if (!match || !this.onAssistantText) return;
-
-      for (const part of match) {
-        const textMatch = part.match(/"text"\s*:\s*"([^"]*)"/);
-        const text = textMatch?.[1]
-          ?.replace(/\\n/g, '\n')
-          ?.replace(/\\"/g, '"');
-        if (text) this.onAssistantText(text);
-      }
+      this.handleSessionUpdate(msg.params ?? {});
     }
+  }
+
+  private handleSessionUpdate(params: SessionUpdateParams) {
+    const update = params.update ?? params;
+    if (!update || typeof update !== 'object') return;
+
+    const sessionUpdate = update.sessionUpdate ?? update.session_update;
+
+    if (sessionUpdate === 'agent_message_chunk' || sessionUpdate === 'agent_message') {
+      const text = this.extractText(update);
+      if (text) this.onAssistantText?.(text);
+      return;
+    }
+
+    if (sessionUpdate === 'agent_thought_chunk' || sessionUpdate === 'tool_call' || sessionUpdate === 'tool_call_update') {
+      const text = this.extractText(update);
+      if (text) this.onStatus?.(text);
+      return;
+    }
+
+    if (sessionUpdate === 'available_commands_update') {
+      return;
+    }
+
+    const fallback = this.extractText(update);
+    if (fallback) this.onStatus?.(fallback);
+  }
+
+  private extractText(value: any): string {
+    const parts: string[] = [];
+
+    const walk = (node: any) => {
+      if (node == null) return;
+      if (typeof node === 'string') return;
+      if (Array.isArray(node)) {
+        for (const item of node) walk(item);
+        return;
+      }
+      if (typeof node !== 'object') return;
+
+      if (typeof node.text === 'string') parts.push(node.text);
+      if (typeof node.content === 'string') parts.push(node.content);
+      if (typeof node.result === 'string') parts.push(node.result);
+      if (typeof node.description === 'string') parts.push(node.description);
+
+      for (const key of Object.keys(node)) {
+        walk(node[key]);
+      }
+    };
+
+    walk(value);
+    return parts.join('');
   }
 
   private request(method: string, params: Record<string, unknown>) {
@@ -99,14 +157,20 @@ export class HermesACPClient {
 
     await this.request('initialize', {
       protocolVersion: 1,
-      clientCapabilities: {},
+      clientCapabilities: {
+        fs: {},
+      },
+      clientInfo: {
+        name: 'hermes-obsidian-mvp',
+        version: '0.0.1',
+      },
     });
     this.initialized = true;
   }
 
   private async ensureSession(cwd?: string) {
     if (this.sessionId) return this.sessionId;
-    const result = await this.request('session/new', cwd ? { cwd } : {});
+    const result = await this.request('session/new', { cwd: cwd || process.cwd() });
     this.sessionId = result?.sessionId ?? result?.session_id ?? result?.id;
     if (!this.sessionId) throw new Error('Hermes ACP did not return a session id');
     return this.sessionId;

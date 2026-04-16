@@ -1,4 +1,6 @@
 import { ChildProcessWithoutNullStreams, spawn } from 'child_process';
+import { existsSync } from 'fs';
+
 
 type PendingRequest = {
   resolve: (value: any) => void;
@@ -24,10 +26,33 @@ export class HermesACPClient {
 
   constructor(private hermesCommand: string) {}
 
+  private resolveHermesCommand() {
+    if (this.hermesCommand.includes('/') || this.hermesCommand.includes('\\')) {
+      return this.hermesCommand;
+    }
+
+    const home = process.env.HOME;
+    const candidates = [
+      this.hermesCommand,
+      home ? `${home}/.local/bin/${this.hermesCommand}` : null,
+      home ? `${home}/.npm-global/bin/${this.hermesCommand}` : null,
+      `/usr/local/bin/${this.hermesCommand}`,
+      `/opt/homebrew/bin/${this.hermesCommand}`,
+    ].filter((value): value is string => Boolean(value));
+
+    for (const candidate of candidates) {
+      if (candidate === this.hermesCommand || existsSync(candidate)) return candidate;
+    }
+
+    return this.hermesCommand;
+  }
+
   private ensureStarted(cwd?: string) {
     if (this.proc) return;
 
-    this.proc = spawn(this.hermesCommand, ['acp'], {
+    const command = this.resolveHermesCommand();
+
+    this.proc = spawn(command, ['acp'], {
       cwd: cwd || process.cwd(),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -43,7 +68,10 @@ export class HermesACPClient {
     });
 
     this.proc.on('error', error => {
-      this.onError?.(`Failed to start Hermes ACP: ${String(error)}`);
+      const extra = command === this.hermesCommand
+        ? ''
+        : ` (resolved from ${this.hermesCommand} to ${command})`;
+      this.onError?.(`Failed to start Hermes ACP${extra}: ${String(error)}`);
     });
 
     this.proc.on('exit', code => {

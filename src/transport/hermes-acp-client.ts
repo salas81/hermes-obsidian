@@ -105,7 +105,12 @@ export class HermesACPClient {
     if (typeof msg.id === 'number' && this.pending.has(msg.id)) {
       const pending = this.pending.get(msg.id)!;
       this.pending.delete(msg.id);
-      if (msg.error) pending.reject(msg.error);
+      if (msg.error) {
+        const detail = typeof msg.error === 'string'
+          ? msg.error
+          : msg.error?.message || JSON.stringify(msg.error);
+        pending.reject(new Error(detail));
+      }
       else pending.resolve(msg.result);
       return;
     }
@@ -188,7 +193,7 @@ export class HermesACPClient {
       client_capabilities: {},
       client_info: {
         name: 'hermes-obsidian-mvp',
-        version: '0.0.1',
+        version: '0.0.2',
       },
     });
     this.initialized = true;
@@ -196,7 +201,7 @@ export class HermesACPClient {
 
   private async ensureSession(cwd?: string) {
     if (this.sessionId) return this.sessionId;
-    const result = await this.request('new_session', { cwd: cwd || process.cwd() });
+    const result = await this.request('session/new', { cwd: cwd || process.cwd(), mcpServers: [] });
     this.sessionId = result?.sessionId ?? result?.session_id ?? result?.id;
     if (!this.sessionId) throw new Error('Hermes ACP did not return a session id');
     return this.sessionId;
@@ -205,8 +210,8 @@ export class HermesACPClient {
   async sendPrompt(text: string, cwd?: string) {
     await this.ensureInitialized(cwd);
     const sessionId = await this.ensureSession(cwd);
-    return this.request('prompt', {
-      session_id: sessionId,
+    return this.request('session/prompt', {
+      sessionId,
       prompt: [{ type: 'text', text }],
     });
   }

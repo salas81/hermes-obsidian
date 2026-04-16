@@ -1,6 +1,6 @@
 {
   "name": "hermes-obsidian",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Minimal Obsidian sidebar chat plugin that talks to Hermes via ACP.",
   "private": true,
   "type": "module",

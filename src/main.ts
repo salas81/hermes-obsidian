@@ -43,10 +43,17 @@ class HermesMVPView extends ItemView {
       ? this.plugin.settings.messages.map(message => ({ ...message }))
       : [];
     this.render();
+    void this.plugin.restoreRemoteConversation();
   }
 
   async onClose() {
     this.plugin.unregisterViewInstance(this);
+  }
+
+  setMessages(messages: ChatMessage[]) {
+    this.messages = messages.map(message => ({ ...message }));
+    this.plugin.persistMessages(this.messages);
+    this.render();
   }
 
   appendMessage(role: ChatMessage['role'], text: string) {
@@ -82,6 +89,7 @@ class HermesMVPView extends ItemView {
     this.isSending = true;
     this.messages.push({ role: 'user', text });
     this.messages.push({ role: 'assistant', text: '' });
+    this.plugin.persistMessages(this.messages);
     this.render();
 
     try {
@@ -221,6 +229,7 @@ export default class HermesObsidianMVPPlugin extends Plugin {
   settings!: HermesPluginSettings;
   client!: HermesACPClient;
   private activeView: HermesMVPView | null = null;
+  private restoreAttempted = false;
 
   async onload() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -267,6 +276,17 @@ export default class HermesObsidianMVPPlugin extends Plugin {
   persistMessages(messages: ChatMessage[]) {
     this.settings.messages = messages.map(message => ({ ...message }));
     void this.saveData(this.settings);
+  }
+
+  async restoreRemoteConversation() {
+    if (this.restoreAttempted) return;
+    this.restoreAttempted = true;
+
+    try {
+      await this.client.restoreLatestSession(this.getVaultPath());
+    } catch (error) {
+      console.warn('[Hermes MVP] Failed to restore latest session', error);
+    }
   }
 
   private wireClientCallbacks() {

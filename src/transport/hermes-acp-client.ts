@@ -1,7 +1,6 @@
 import { ChildProcessWithoutNullStreams, spawn } from 'child_process';
 import { existsSync } from 'fs';
 
-
 type PendingRequest = {
   resolve: (value: any) => void;
   reject: (reason?: unknown) => void;
@@ -11,6 +10,11 @@ type SessionUpdateParams = {
   sessionId?: string;
   session_id?: string;
   update?: Record<string, any>;
+};
+
+type SessionSummary = {
+  id: string;
+  [key: string]: any;
 };
 
 export class HermesACPClient {
@@ -110,8 +114,7 @@ export class HermesACPClient {
           ? msg.error
           : msg.error?.message || JSON.stringify(msg.error);
         pending.reject(new Error(detail));
-      }
-      else pending.resolve(msg.result);
+      } else pending.resolve(msg.result);
       return;
     }
 
@@ -193,10 +196,60 @@ export class HermesACPClient {
       client_capabilities: {},
       client_info: {
         name: 'hermes-obsidian-mvp',
-        version: '0.0.2',
+        version: '0.0.4',
       },
     });
     this.initialized = true;
+  }
+
+  async listSessions(cwd?: string): Promise<SessionSummary[]> {
+    await this.ensureInitialized(cwd);
+    const result = await this.request('session/list', {});
+    const sessions = Array.isArray(result?.sessions) ? result.sessions : [];
+    return sessions
+      .map((session: any) => {
+        const id = session?.id ?? session?.sessionId ?? session?.session_id;
+        return id ? { ...session, id } : null;
+      })
+      .filter((session: SessionSummary | null): session is SessionSummary => Boolean(session));
+  }
+
+  async resumeSession(sessionId: string, cwd?: string) {
+    await this.ensureInitialized(cwd);
+    const result = await this.request('session/resume', {
+      sessionId,
+      cwd: cwd || process.cwd(),
+    });
+    this.sessionId = result?.sessionId ?? result?.session_id ?? result?.id ?? sessionId;
+    return result;
+  }
+
+  async loadSession(sessionId: string, cwd?: string) {
+    await this.ensureInitialized(cwd);
+    const result = await this.request('session/load', {
+      sessionId,
+      cwd: cwd || process.cwd(),
+      mcpServers: [],
+    });
+    this.sessionId = result?.sessionId ?? result?.session_id ?? result?.id ?? sessionId;
+    return result;
+  }
+
+  async restoreLatestSession(cwd?: string) {
+    const sessions = await this.listSessions(cwd);
+    if (!sessions.length) return null;
+
+    const latest = [...sessions].sort((a, b) => {
+      const aTs = Number(a.updatedAt ?? a.updated_at ?? a.createdAt ?? a.created_at ?? 0);
+      const bTs = Number(b.updatedAt ?? b.updated_at ?? b.createdAt ?? b.created_at ?? 0);
+      return bTs - aTs;
+    })[0];
+
+    try {
+      return await this.loadSession(latest.id, cwd);
+    } catch {
+      return this.resumeSession(latest.id, cwd);
+    }
   }
 
   private async ensureSession(cwd?: string) {

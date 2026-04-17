@@ -399,6 +399,14 @@ export default class HermesObsidianMVPPlugin extends Plugin {
         font-size: 14px;
         line-height: 1.55;
         word-break: break-word;
+        user-select: text;
+        -webkit-user-select: text;
+        cursor: text;
+      }
+
+      .hermes-mvp-bubble-body * {
+        user-select: text;
+        -webkit-user-select: text;
       }
 
       .hermes-mvp-bubble-body > :first-child {

@@ -10,10 +10,12 @@ type ChatMessage = {
 
 interface HermesPluginSettings {
   hermesCommand: string;
+  messages: ChatMessage[];
 }
 
 const DEFAULT_SETTINGS: HermesPluginSettings = {
   hermesCommand: 'hermes',
+  messages: [],
 };
 
 class HermesMVPView extends ItemView {
@@ -37,6 +39,9 @@ class HermesMVPView extends ItemView {
 
   async onOpen() {
     this.plugin.registerViewInstance(this);
+    this.messages = Array.isArray(this.plugin.settings.messages)
+      ? this.plugin.settings.messages.map(message => ({ ...message }))
+      : [];
     this.render();
   }
 
@@ -65,6 +70,7 @@ class HermesMVPView extends ItemView {
       this.messages.push({ role, text });
     }
 
+    this.plugin.persistMessages(this.messages);
     this.render();
   }
 
@@ -256,6 +262,11 @@ export default class HermesObsidianMVPPlugin extends Plugin {
     await this.saveData(this.settings);
     this.client = new HermesACPClient(this.settings.hermesCommand);
     this.wireClientCallbacks();
+  }
+
+  persistMessages(messages: ChatMessage[]) {
+    this.settings.messages = messages.map(message => ({ ...message }));
+    void this.saveData(this.settings);
   }
 
   private wireClientCallbacks() {
